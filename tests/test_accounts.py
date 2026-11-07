@@ -71,6 +71,23 @@ class AccountTests(unittest.TestCase):
         self.manager.save("personal")
         self.manager.use("work")
 
+    def test_remove_active_and_inactive_profiles_only_deletes_the_named_saved_copy(self):
+        for name in ("work", "lab", "personal"):
+            self.login(name)
+            self.manager.save(name)
+        credentials = self.manager.creds.read_bytes()
+        settings = self.manager.settings.read_bytes()
+        self.manager.remove("lab")
+        self.assertEqual(self.manager.vault.names(), ["personal", "work"])
+        self.manager.remove("personal")
+        self.assertEqual(self.manager.vault.names(), ["work"])
+        self.assertEqual(self.manager.settings.read_bytes(), settings)
+        self.assertEqual(self.manager.creds.read_bytes(), credentials)
+        with self.assertRaisesRegex(RuntimeError, "Unknown profile"):
+            self.manager.remove("personal")
+        self.manager.save("personal")
+        self.manager.use("work")
+
     def test_interrupted_switch_resumes(self):
         self.login("work")
         self.manager.save("work")
@@ -86,6 +103,8 @@ class AccountTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, "simulated interruption"):
                 self.manager.use("work")
         self.assertEqual(self.manager.vault.get("pending")["name"], "work")
+        with self.assertRaisesRegex(RuntimeError, "Finish the interrupted switch"):
+            self.manager.remove("work")
         self.manager.use("work")
         self.assertIsNone(self.manager.vault.get("pending"))
         self.assertEqual(self.fixture_status()["email"], "work@example.invalid")

@@ -46,6 +46,14 @@ For a one-click switch, open the folder where you want the shortcut and run `cla
 
 A request already sent uses its original account. New sessions use the selected login. In a local test with simulated subscription credentials and the installed Windows Claude CLI, running workers changed accounts on the next turn while retaining their processes and conversations. Claude Code controls credential caching, and its storage behavior may change between versions.
 
+### Remove a saved profile
+
+```powershell
+claude-account remove lab
+```
+
+This deletes the named login from Windows Credential Manager. If it is the active profile, Claude and your running Herdr sessions stay signed in. To switch to another saved account and forget the old one, run `claude-account use work` **before** `claude-account remove lab`. Otherwise, the usual unsaved-login check asks you to name the active login before switching away. You can delete any shortcut you made for the removed name.
+
 ## If you use Claude's usual login
 
 Using `/login` or `claude auth login` directly makes the browser-selected account active. Use `claude-account list` to see it. If it is already saved, you can switch away normally. If it is unfamiliar, run `claude-account save NEW-NAME` before switching away. The tool refuses to assign an existing name to a different identity.
@@ -57,7 +65,7 @@ If a saved login expires or is revoked, use `claude-account add NAME` and sign b
 - Named profiles contain subscription OAuth credentials and account metadata. They are saved as **Generic Credentials** under `ClaudeAccountCLI/v1/profile/` in Windows Credential Manager for the current Windows user. Treat them as sensitive. Software running as that user may be able to access them.
 - Switching updates the account-specific portions of Claude's native login files while retaining unrelated settings and MCP credentials. The tool uses local locks and records an interrupted switch in Credential Manager for recovery. Claude performs browser authentication and token renewal.
 - For support, share the command name and a redacted error. Keep credentials, login codes, transcripts, and account files private. `list` output includes email and organization details. Generated shortcuts contain machine-specific paths.
-- To remove a saved profile, open **Credential Manager → Windows Credentials → Generic Credentials** and remove the matching `ClaudeAccountCLI/v1/profile/NAME` item. To sign the active session out as well, use Claude's own logout command. To uninstall the CLI, remove its installed `claude-account.cmd`, its `ClaudeAccountCLI` program folder, and any shortcuts you created.
+- To sign the active session out, use Claude's own logout command. To uninstall the CLI, remove saved profiles with `claude-account remove NAME`, then delete the installed `claude-account.cmd`, its `ClaudeAccountCLI` program folder, and any shortcuts you created.
 
 See [Claude Code authentication](https://code.claude.com/docs/en/authentication) for account types and login restrictions.
 

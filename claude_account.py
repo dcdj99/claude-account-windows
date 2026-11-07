@@ -99,6 +99,15 @@ class Accounts:
         if self.vault.get("pending"):
             raise RuntimeError("A switch was interrupted. Run 'list' and repeat the indicated 'use' command.")
 
+    def remove(self, name):
+        pending = self.vault.get("pending")
+        if pending and pending["name"] == name:
+            raise RuntimeError(f"Finish the interrupted switch with 'claude-account use {name}' before removing it.")
+        if name not in self.vault.names():
+            raise RuntimeError(f"Unknown profile '{name}'. Run 'claude-account list'.")
+        self.vault.delete("profile/" + name)
+        print(f"Removed saved profile '{name}' from Windows Credential Manager.")
+
     def save(self, name):
         status = self.status()
         with locked(self.config, self.settings):
@@ -278,6 +287,7 @@ def main():
     for cmd, desc in (("save", "Name or refresh your current Claude login."),
                       ("add", "Sign in as another account through Claude and save it."),
                       ("use", "Make a saved account the shared Claude default."),
+                      ("remove", "Delete a saved profile from Windows Credential Manager."),
                       ("shortcut", "Create a one-click switch in the current folder.")):
         sub = cmds.add_parser(cmd, help=desc)
         sub.add_argument("name", type=label)
@@ -321,6 +331,8 @@ def main():
             manager.save(opts.name)
         elif opts.action == "use":
             manager.use(opts.name)
+        elif opts.action == "remove":
+            manager.remove(opts.name)
         elif opts.action == "recover-login":
             manager.recover()
 
