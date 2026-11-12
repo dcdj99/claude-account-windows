@@ -4,6 +4,7 @@ import ctypes as C
 from ctypes import wintypes as W
 import json
 import os
+import struct
 from pathlib import Path
 import threading
 import time
@@ -137,6 +138,8 @@ replace_file = bind(kernel, "ReplaceFileW", W.BOOL, W.LPCWSTR, W.LPCWSTR, W.LPCW
 local_free = bind(kernel, "LocalFree", C.c_void_p, C.c_void_p)
 close_handle = bind(kernel, "CloseHandle", W.BOOL, W.HANDLE)
 create_directory = bind(kernel, "CreateDirectoryW", W.BOOL, W.LPCWSTR, C.POINTER(SecurityAttributes))
+device_io = bind(kernel, "DeviceIoControl", W.BOOL, W.HANDLE, W.DWORD, C.c_void_p, W.DWORD,
+                 C.c_void_p, W.DWORD, C.POINTER(W.DWORD), C.c_void_p)
 
 
 def reject_links(path):
@@ -168,6 +171,10 @@ def private_directory(path):
     reject_links(path)
 
 
+class LeaseBusyError(RuntimeError):
+    pass
+
+
 class SessionLease:
     """Exclusive Windows file handle inherited by Claude: survives wrapper death."""
     def __init__(self, path):
@@ -179,7 +186,7 @@ class SessionLease:
         if handle == C.c_void_p(-1).value:
             error = C.get_last_error()
             if error in (32, 33):
-                raise RuntimeError("This chat is running or busy. Exit Claude in that chat first.")
+                raise LeaseBusyError("This chat is running or busy. Exit Claude in that chat first.")
             raise C.WinError(error)
         self.handle = handle
         return self
@@ -187,6 +194,43 @@ class SessionLease:
     def __exit__(self, *unused):
         close_handle(self.handle)
         self.handle = None
+
+
+def create_history_junction(path, target):
+    """Share only native history; credential paths still reject every reparse point."""
+    path, target = Path(path), Path(target).absolute()
+    reject_links(path)
+    reject_links(target)
+    if not target.is_dir() or path.exists():
+        raise RuntimeError("History requires an existing real target and a new junction path.")
+    private_directory(path)
+    handle = create_file(str(path), 0x40000000, 0, None, 3, 0x02200000, None)
+    if handle == C.c_void_p(-1).value:
+        path.rmdir()
+        raise C.WinError(C.get_last_error())
+    substitute = ("\\??\\" + str(target)).encode("utf-16le")
+    display = str(target).encode("utf-16le")
+    names = substitute + b"\0\0" + display + b"\0\0"
+    raw = struct.pack("<LHHHHHH", 0xA0000003, len(names) + 8, 0,
+                      0, len(substitute), len(substitute) + 2, len(display)) + names
+    buffer, returned = C.create_string_buffer(raw), W.DWORD()
+    try:
+        if not device_io(handle, 0x900A4, buffer, len(raw), None, 0, C.byref(returned), None):
+            raise C.WinError(C.get_last_error())
+    finally:
+        close_handle(handle)
+    if path.resolve() != target.resolve():
+        raise RuntimeError("History junction verification failed.")
+
+
+def remove_history_junction(path, target):
+    """Unlink exactly our history junction, never recursively follow it."""
+    path, target = Path(path), Path(target)
+    reject_links(path.parent)
+    reject_links(target)
+    if path.lstat().st_reparse_tag != 0xA0000003 or path.resolve() != target.resolve():
+        raise RuntimeError("Unexpected history path; refusing cleanup.")
+    path.rmdir()
 
 
 def private_json(path, value):

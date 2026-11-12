@@ -1,181 +1,192 @@
 # claude-account for Windows
 
-Save Claude Code subscription logins under names, then choose an account for one named chat or change your shared default. `claude-account run work --name billing` starts a chat pinned to `work`. `claude-account use personal` changes the shared default without changing that pin.
+Save Claude Code subscription logins, then choose an account for a single launch or change your shared default. Claude itself owns conversation names, history, resume, continue and forks.
 
-This is an independent Windows utility. It works with Claude Code's default **file-backed claude.ai subscription login**. Sessions using a separate configuration folder, an API key, or a cloud provider follow their own authentication settings. Claude Desktop, WSL, and other operating systems are outside the scope of this tool.
+```powershell
+claude-account run work -- --name billing
+# Exit Claude, then resume the same conversation with another saved account:
+claude-account run personal -- --resume billing
+```
 
-## Choose the account scope
+Each launch has a private login. Later `claude-account use lab` changes do not affect it. The account choice lasts for that launch; it is not permanently attached to the conversation.
 
-| Command | What it changes |
-| --- | --- |
-| `claude-account use work` | The shared default used by ordinary Claude sessions. |
-| `claude-account run work --name billing` | Starts one new chat pinned to `work`; leaves the shared default alone. |
-| `claude-account resume billing --account personal` | Changes only the stopped `billing` chat, keeping its conversation. |
+This independent utility supports native Windows and Claude Code's file-backed **claude.ai subscription login**. It requires Python 3.12 or later and a recent `claude.exe` on PATH. The test report records tested versions. API keys, alternate Credential Manager login backends, separate configuration folders, cloud-provider authentication, WSL and Claude Desktop are outside its scope.
 
-`work`, `personal` and `billing` are examples. Substitute your saved account names and a chat name you choose. Exit Claude before resuming or changing a managed chat's account.
+## Install or upgrade
 
-## Get started
-
-You need native Windows, Python 3 (tested with 3.13), and a recent `claude.exe` on your PATH. The tool uses Python's standard library and Windows APIs. Start from an ordinary PowerShell window. Sign in with `claude auth login` first if needed.
-
-Clone the repository, or download and extract its ZIP. In the folder containing `claude-account.cmd`, run:
+Download and extract the package, or clone the repository. From the folder containing `claude-account.cmd`:
 
 ```powershell
 .\claude-account.cmd --help
-.\claude-account.cmd list
 .\claude-account.cmd install
 ```
 
-The installer copies the Python files into a versioned directory under `%LOCALAPPDATA%\Programs\ClaudeAccountCLI` and places the command in `%USERPROFILE%\.local\bin`. That bin directory must already exist and be on PATH. For portable use, stay in the extracted folder and use `.\claude-account.cmd` in place of `claude-account` below. Installation requires no administrator privileges.
+The installer copies the runtime into a versioned directory under `%LOCALAPPDATA%\Programs\ClaudeAccountCLI` and places the command in `%USERPROFILE%\.local\bin`. That bin directory must already exist and be on PATH. Administrator privileges are not required. For portable use, use the full path to the extracted command instead.
 
-To upgrade an existing installation, get the updated repository files and run `.\claude-account.cmd install` from that folder. The installer replaces the managed launcher with a versioned copy of the new program. Saved accounts, managed chats and the current shared login are retained.
+The same command upgrades an existing managed installation, retaining saved accounts and the shared login. Old managed chats are migrated when you use the new launcher, as described below.
 
-### Save your first accounts
+## Save accounts
 
-Run these commands one at a time:
+Use an ordinary PowerShell window. If needed, first sign in with `claude auth login`.
 
 ```powershell
 claude-account save work
 claude-account add personal --isolated
-claude-account add lab --isolated
 claude-account list
 ```
 
-`save` names the login you already have. Each `add NAME --isolated` opens Claude's browser sign-in and saves the selected account without changing the shared default. Select the intended account, or open the authorization link in its browser profile. Add `--sso` for an explicit SSO flow. If you want the new sign-in to become the shared default immediately, use ordinary `add NAME` without `--isolated`.
+`save` names the current login. `add NAME --isolated` opens Claude's browser sign-in and saves the selected account without changing the shared default. Select the intended browser account; add `--sso` for enterprise SSO. Ordinary `add NAME` without `--isolated` also changes the shared login.
 
-You can save additional accounts the same way. Names start with a lowercase letter and contain up to 32 lowercase letters, digits, hyphens, or underscores.
+Account labels start with a lowercase letter and contain up to 32 lowercase letters, digits, hyphens or underscores. Conversation names are native Claude names and may contain spaces.
 
-## Pinned chats: the full journey
+## The conversation journey
 
-Start in the project folder where you want Claude to work. Use an already-saved account from `claude-account list`:
+Run these commands from your project folder. `work`, `personal` and `lab` are example saved accounts.
+
+### Start and name a conversation
 
 ```powershell
-claude-account run work --name billing
+claude-account run work -- --name billing
 ```
 
-The launch banner shows the chat name, selected account and pinned mode. The chat has its own login files. Your shared default stays unchanged, and later shared-default changes do not affect this chat. If you omit `--name`, the command generates a name and displays it. Names use the same rules as account labels.
+The banner shows the chosen account. Work normally in Claude; native `/rename` can change the conversation's name. Omitting `--name` lets Claude manage the title. The wrapper does not generate a permanent tracking name. Normal Claude permissions still apply.
 
-Exit Claude normally before changing or reopening a managed chat:
+### Close and resume with another account
+
+Exit the old Claude process first:
+
+```powershell
+claude-account run personal -- --resume billing
+```
+
+This continues the same conversation under `personal` without changing the shared default. Choose the account explicitly each time you launch.
+
+Claude's native picker, latest conversation, session ID and absolute transcript path are also supported:
+
+```powershell
+claude-account run personal -- --resume
+claude-account run personal -- --continue
+claude-account run personal -- --resume SESSION-UUID
+claude-account run personal -- --resume "C:\absolute\path\to\SESSION-UUID.jsonl"
+```
+
+Replace the UUID/path examples with real values. Native project filtering applies. Print-mode conversations follow Claude's own picker/continue rules, which differ from interactive conversations. See [Claude's session documentation](https://code.claude.com/docs/en/sessions).
+
+To branch the conversation:
+
+```powershell
+claude-account run work -- --resume billing --fork-session --name billing-experiment
+```
+
+Exit the old process before changing its account. The wrapper cannot prevent arbitrary native processes from writing the same transcript concurrently. There is no automatic account fallback or replay of a failed prompt.
+
+### Return to ordinary Claude
+
+```powershell
+claude --resume billing
+```
+
+The conversation is in the ordinary native history store. Plain Claude uses the shared login, not the account chosen for a previous wrapper launch.
+
+To change that shared default intentionally:
+
+```powershell
+claude-account use lab
+claude-account list
+```
+
+The asterisk marks the saved account matching the current shared email and organization. A valid saved login normally requires no browser sign-in. Run `claude-account` without arguments for the shared-account picker. `claude-account shortcut work` creates a one-click shared-account switch in the current folder.
+
+### Inspect running processes and saved history
 
 ```powershell
 claude-account sessions
-claude-account resume billing
-claude-account resume billing --account personal
+claude-account run work -- --resume
 ```
 
-The last command continues the same conversation under `personal` and remembers that choice for subsequent `resume billing` calls. Other managed chats and the shared default keep their choices. It does not migrate in-flight requests or automatically replay a failed prompt. If the new account cannot be selected or Claude fails before opening the chat, the previous selection is retained. Once the new chat has opened, a later API failure or interrupted exit retains the newly selected account.
+`sessions` shows only currently running account-launched processes, with account and project. Stopped launches do not accumulate there. Claude's resume picker shows conversation history. Native retention and deletion remain Claude's responsibility, including `cleanupPeriodDays` and native purge functionality. The launcher does not override retention.
 
-To follow shared defaults again, or pin the chat again later:
-
-```powershell
-claude-account resume billing --shared
-claude-account resume billing --account work
-```
-
-Shared mode intentionally uses the ordinary shared login. Once the shared-mode process exits, the wrapper scrubs the old isolated login, retaining conversation history. If the wrapper crashes, the retained login remains recorded as a dependency until a successful cleanup.
-
-Extra supported Claude options follow `--`:
+### Renew or remove a saved account
 
 ```powershell
-claude-account run work --name audit -- --model sonnet
-claude-account resume audit -- -p "Review the current changes"
-```
-
-Model, effort, permission mode, agent and added-directory choices are remembered. Prompts and print-mode options are not replayed on later resumes. Options that would bypass managed login, history or lifecycle tracking are refused, including background launch, custom settings, native resume flags and permission bypass. Normal Claude permission prompts still apply.
-
-### Import an existing conversation
-
-Exit its ordinary Claude process first. Supply the absolute path of its UUID-named transcript file:
-
-```powershell
-claude-account run work --name migrated --resume "C:\absolute\path\to\session-uuid.jsonl"
-```
-
-Replace the example path with the real transcript. Imported history remains at its original path; Claude may keep appending there. Existing managed conversation claims cannot be imported again under a second name. History within another active managed chat's private configuration remains reserved to that chat. The wrapper cannot detect arbitrary ordinary Claude processes, so do not open the same transcript separately while it is managed.
-
-### Renew or add without changing the default
-
-```powershell
-claude-account add client --isolated
 claude-account renew work
-```
-
-Each command opens Claude's browser login in a temporary private configuration. Select the intended account. Renewal must match the identity already saved under the label; a different account is refused. The shared login stays unchanged. Stop and resume affected pinned chats after renewal so they load the new login. Ordinary `add NAME` retains its original behavior of changing the shared login.
-
-Claude handles normal token refresh inside each running chat. The wrapper reconciles matching credentials at startup and exit, and refuses to overwrite a saved profile changed by another operation. It does not continuously synchronize tokens between running processes. If a provider revokes an older refresh token, stop the affected chat, renew the account, and resume. There is no automatic switch to another account when authentication fails or a limit is reached.
-
-### Inspect, recover and remove
-
-`claude-account sessions` shows each chat's name, pin or shared mode, project and status. A second managed launch or deletion is refused while that named chat is running. The Windows lock remains held by Claude if its wrapper exits unexpectedly; after Claude itself exits, the next managed resume recovers the saved transcript.
-
-If native `/resume` makes two managed names point to the same conversation, later wrapper launches refuse the conflict. Keep the intended name and delete the other with `delete-session NAME --yes` without `--history`. The wrapper does not intercept native `/resume` or ordinary Claude launches while they are running; use managed `resume` commands for lifecycle changes.
-
-Avoid `/login` and `/logout` inside pinned chats. They directly change that private login. The wrapper detects missing or mismatched identity, refuses to save it under the original account name, and requires an explicit `resume CHAT --account NAME` afterward. This is detection and recovery, not interception of Claude's commands. Use the wrapper's account-change commands for a reliable pin.
-
-```powershell
-claude-account delete-session billing --yes
-claude-account delete-session audit --history --yes
-claude-account remove work
-```
-
-Deletion scrubs the chat's isolated credentials and archives its managed name. History is kept unless `--history` is supplied. Even with that option, imported and shared transcripts outside the chat's private directory are retained. A retained transcript can be imported under a new name. Removing an account is refused while a nonarchived managed chat still pins or retains its login; repin or delete those chats first.
-
-### Settings and launchers
-
-Pinned chats use current user settings at launch and normal project settings. User instructions, skills, commands, agents, hook files and plugin registry references are seeded when their private configuration is first created. Later edits to those copied files are not automatically synchronized. Managed hooks record only session identity, project and transcript path, so native conversation changes can be recovered. Disabling lifecycle hooks or selecting conflicting authentication settings is refused.
-
-Use `claude-account run` or `resume` from an ordinary terminal, including a manually opened shell pane. Child processes inherit the pinned configuration. Automatic Herdr worker creation, restart and lane resumption have not been integrated or live-tested by this update; launching a plain `claude` process elsewhere still uses that process's own configuration.
-
-## Shared default
-
-```powershell
-claude-account use work
-claude-account list
-```
-
-The asterisk in `list` marks the saved account matching Claude's active email and organization. Run `claude-account` without arguments for a terminal picker. A valid saved login works without another browser sign-in.
-
-For a one-click switch, open the folder where you want the shortcut and run `claude-account shortcut work`. Double-click **Use Claude work.cmd** to select that account. Create a shortcut for each profile you use. A shortcut contains the local interpreter and script paths plus the profile name.
-
-A request already sent uses its original account. New ordinary Claude sessions use the selected shared login; pinned managed chats retain their own account choices. In a local test with simulated subscription credentials and the installed Windows Claude CLI, running workers changed accounts on the next turn while retaining their processes and conversations. Claude Code controls credential caching, and its storage behavior may change between versions.
-
-### Remove a saved profile
-
-```powershell
 claude-account remove lab
 ```
 
-This deletes the named login from Windows Credential Manager if no managed chat still depends on it. If it is the active shared profile, ordinary Claude processes stay signed in. To switch to another saved account and forget the old one, run `claude-account use work` **before** `claude-account remove lab`. Otherwise, the usual unsaved-login check asks you to name the active login before switching away. You can delete any shortcut you made for the removed name.
+Renewal uses isolated browser login and requires the identity already saved under the label. Exit and reopen affected processes to load the renewed login. The shared default stays unchanged.
 
-## If you use Claude's usual login
+Claude handles token refresh inside a launch. On exit or stopped-launch recovery, the wrapper saves matching refreshed credentials only if the saved account has not changed since launch. Tokens are not continuously synchronized across processes. If a provider invalidates an older token, exit, renew and resume.
 
-Using `/login` or `claude auth login` in an ordinary shared session makes the browser-selected account the shared login. Use `claude-account list` to see that shared login. If it is already saved, you can switch away normally. If it is unfamiliar, run `claude-account save NEW-NAME` before switching away. The tool refuses to assign an existing name to a different identity.
+Removal is refused while an account launch is running or an unmigrated old chat retains the login. Native conversations survive removal of a saved label. Removing the active shared profile does not sign ordinary Claude out; use Claude's logout command for that.
 
-Inside a pinned chat, `/login` changes that chat's private login instead. Use `claude-account sessions` to inspect managed chats and follow the managed-chat recovery instructions above.
+## Upgrade old pinned chats
 
-If a saved login expires or is revoked, use `claude-account renew NAME` and sign back into the same account, then reopen affected managed chats. Use ordinary `claude-account add NAME` only when you also want to change the shared login. If an account switch is interrupted, `list` tells you which `use NAME` command to repeat. If a subsequent external login or refresh prevents recovery, `claude-account recover-login` opens Claude's browser flow to establish the active login.
+New launches do not create the old per-chat registry. Existing records remain as a finite compatibility archive.
 
-## Credential handling
+Exit old managed Claude processes, then optionally migrate explicitly:
 
-- Named profiles contain subscription OAuth credentials and account metadata. They are saved as **Generic Credentials** under `ClaudeAccountCLI/v1/profile/` in Windows Credential Manager for the current Windows user. Treat them as sensitive. Software running as that user may be able to access them.
-- Managed chat data lives under `%LOCALAPPDATA%\ClaudeAccountCLI\data\sessions`. Each pinned chat has its own Claude-native `.credentials.json` inside an access-restricted directory. These files are sensitive even though the saved account catalog remains in Credential Manager. Session metadata and hooks do not store tokens or prompt content. Chat transcripts remain sensitive.
-- Switching updates the account-specific portions of Claude's native login files while retaining unrelated settings and MCP credentials. The tool uses local locks and records an interrupted switch in Credential Manager for recovery. Claude performs browser authentication and token renewal.
-- For support, share the command name and a redacted error. Keep credentials, login codes, transcripts, and account files private. `list` output includes email and organization details. Generated shortcuts contain machine-specific paths.
-- To sign the active session out, use Claude's own logout command. To uninstall the CLI, exit managed chats and run `claude-account delete-session NAME --yes` for each one to scrub its isolated login while retaining history. Then remove saved profiles with `claude-account remove NAME` and delete the installed `claude-account.cmd`, its `ClaudeAccountCLI` program folder, and any shortcuts you created. Retained transcripts remain in their original locations.
+```powershell
+claude-account sessions --legacy
+claude-account migrate-sessions
+claude-account run personal -- --resume billing
+```
 
-See [Claude Code authentication](https://code.claude.com/docs/en/authentication) for account types and login restrictions.
+Normal launches also run migration. Running old chats are skipped. Stopped legacy transcripts and associated files are copied into native history without overwriting different files. Conflicts stop migration and retain originals. Private login files are scrubbed only after the history copy succeeds. Original private history remains as a backup; old memory directories stay in that backup rather than being merged over current native memory.
 
-## Run the tests
+The first successful resume through an old label applies a native name. Later `run ... -- --resume NAME` follows native naming, including subsequent `/rename` changes. The old shortcut can still resolve the original legacy label directly:
 
-On Windows, from the repository root:
+```powershell
+claude-account resume billing --account personal
+```
+
+For a legacy record, `resume billing` without an account uses its original saved account as a compatibility fallback. New native conversations require `--account NAME` or `--shared` with this shortcut. The shortcut does not remember a new permanent pin. Prefer explicit `run ACCOUNT -- --resume NAME`.
+
+Old top-level `run ACCOUNT --name NAME` and `run ACCOUNT --resume PATH` flags remain aliases for native flags. `delete-session NAME --yes` operates only on old records. Its `--history` option removes the old private backup, not migrated native history or external imported transcripts. It is not the native conversation deletion command.
+
+## Options and settings
+
+Supported Claude options follow `--`: name, resume, continue, fork, model, effort, permission mode, agent, added directories, print, input/output formats, turn/budget limits, verbose and debug.
+
+```powershell
+claude-account run work -- --name audit --model sonnet
+claude-account run personal -- --resume audit -p "Review the changes"
+```
+
+The wrapper stores no per-conversation model or option preferences. Claude restores native conversation state according to its own rules.
+
+Custom settings/config overrides, alternative authentication, background dispatch and permission-bypass flags are refused. Every account launch supplies a settings file, which also makes current Claude versions refuse automatic attachment to a running background session. Stop that session first or fork it.
+
+The wrapper does not intercept in-session `/resume`, `/login`, `/logout`, background controls or child programs. These can change native behavior. Exit and launch explicitly for a reliable account change. A different login identity is never saved over the originally selected account label.
+
+Current user settings, instructions, skills, commands, agents, hook files and plugin registry references are copied into the private launch configuration. Project settings apply normally. Custom lifecycle hooks are not required; disabling hooks is supported. Conflicting authentication settings are refused. Enterprise managed settings and native permissions still apply.
+
+User-level configuration edits made inside the temporary configuration are discarded at exit. Make persistent global changes in your ordinary Claude configuration. Project edits and native conversation history persist. Launches use Claude's documented `--system-prompt-snapshot off` option so resumed context does not retain paths to a deleted launch directory.
+
+Automatic Herdr worker creation/restart is not integrated. A plain `claude` launched elsewhere uses that process's own configuration.
+
+## Storage and recovery
+
+- Saved credentials remain in Windows Credential Manager under `ClaudeAccountCLI/v1/profile/` for the current user.
+- Protected temporary logins live under `%LOCALAPPDATA%\ClaudeAccountCLI\data\launches`. A validated directory junction shares only `projects` with `%USERPROFILE%\.claude\projects`. Credential paths remain private and reject links.
+- Native transcripts and project memory are shared across chosen accounts and plain Claude. This provides one native history, not separate account-specific histories. Credentials and transcripts remain sensitive local data.
+- The Windows lease stays held by Claude if its wrapper dies. After Claude exits, the next run, `sessions`, migration or removal command cleans stopped launch files. Cleanup removes only the history link, never traverses it recursively.
+- Shared `use` preserves unrelated login fields and MCP credentials, with interrupted-switch recovery. If an external login prevents recovery, `claude-account recover-login` opens Claude's browser flow. Save an unfamiliar shared login under a new label before switching away.
+
+For support, share redacted errors and command names, not credentials, login codes or private transcripts. `list` contains identifying account details.
+
+To uninstall, exit account launches and run `claude-account sessions` to clean stopped files. Migrate remaining old chats first. Remove saved labels if desired, then delete the installed command and its program folder. Native history is retained.
+
+## Tests
+
+From the source folder on Windows:
 
 ```powershell
 python -B -m unittest discover -s tests -v
 ```
 
-The default suite uses invented account records, disposable files and an in-memory substitute for Credential Manager. It exercises pinning, switching, crash recovery, renewal races, deletion, real Windows lock inheritance and installation into a disposable home.
+Default tests use invented profiles, an in-memory credential catalog and disposable files. They cover isolation, refresh/renewal races, migration conflicts and backups, cleanup, real Windows junctions and inherited leases, installation and legacy behavior.
 
-The optional integration test runs the installed native Claude executable with invented credentials against a loopback API that returns simulated responses. It observes the credential selected for each request, conversation continuity, a default change between turns of one live process, lifecycle hooks and a simulated account limit. It does not sign into a real account or validate live browser authentication, provider token renewal, or live Herdr integration.
+Optional integration tests use the installed Claude executable, invented credentials and a loopback API with simulated responses:
 
 ```powershell
 $env:CLAUDE_ACCOUNT_NATIVE_TEST = '1'
@@ -183,4 +194,14 @@ python -B -m unittest discover -s tests -v
 Remove-Item Env:CLAUDE_ACCOUNT_NATIVE_TEST
 ```
 
-Run the optional test only where local loopback connections and the installed Claude executable are permitted. Native Claude storage and hook interfaces can change; re-run it after a Claude upgrade before relying on the same compatibility assumptions.
+They check actual credentials selected for requests, native name/ID/path resume, continue, forks, ordinary shared resume, account stability between turns, migration and no fallback after an API error. Real browser authentication, provider token refresh, billing and Herdr integration are not exercised. Re-run after Claude upgrades.
+
+An optional manual terminal test exercises the actual picker with the same isolated API. Follow its printed instructions; Claude may request trust for the disposable folder:
+
+```powershell
+$env:CLAUDE_ACCOUNT_NATIVE_TEST = '1'
+$env:CLAUDE_ACCOUNT_PICKER_TEST = '1'
+python -B -m unittest discover -s tests -p test_native_flow.py -v
+Remove-Item Env:CLAUDE_ACCOUNT_PICKER_TEST
+Remove-Item Env:CLAUDE_ACCOUNT_NATIVE_TEST
+```

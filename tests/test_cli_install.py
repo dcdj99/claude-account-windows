@@ -22,7 +22,7 @@ class InstallationTests(unittest.TestCase):
             launcher = bin_dir / "claude-account.cmd"
             installed = list((Path(tmp) / "local" / "Programs" / "ClaudeAccountCLI").iterdir())
             self.assertEqual(len(installed), 1)
-            for name in ("claude_account.py", "claude_account_windows.py", "claude_sessions.py", "claude_account_hook.py"):
+            for name in ("claude_account.py", "claude_account_windows.py", "claude_sessions.py", "claude_account_hook.py", "claude_native.py"):
                 self.assertEqual((installed[0] / name).read_bytes(), (source / name).read_bytes())
             help_result = subprocess.run([sys.executable, "-I", "-B", str(installed[0] / "claude_account.py"), "resume", "--help"],
                                          env=env, capture_output=True, text=True, timeout=15)

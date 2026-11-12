@@ -126,7 +126,7 @@ class Sessions:
             env["CLAUDE_CONFIG_DIR"] = str(config)
         return env
 
-    def check_settings(self, project):
+    def check_settings(self, project, require_hooks=True):
         shared_config = obj(self.home / ".claude.json", True)
         if shared_config.get("cachedGrowthBookFeatures", {}).get("tengu_windows_credman"):
             raise RuntimeError("Claude's alternate Credential Manager backend is enabled. File-backed managed logins are unavailable.")
@@ -141,7 +141,7 @@ class Sessions:
             validate_environment(env)
             if settings.get("apiKeyHelper") or settings.get("forceLoginMethod") == "console":
                 raise RuntimeError("Settings select another authentication method: " + str(path))
-            if settings.get("disableAllHooks"):
+            if require_hooks and settings.get("disableAllHooks"):
                 raise RuntimeError("Managed chat tracking requires lifecycle hooks, but settings disable them: " + str(path))
 
     def seed(self, config, target):
