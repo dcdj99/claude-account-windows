@@ -1,4 +1,4 @@
-"""Named Windows profiles for Claude Code's shared subscription login."""
+"""Saved Claude accounts, shared defaults, and independently pinned chats on Windows."""
 import argparse
 import hashlib
 import json
@@ -248,7 +248,7 @@ def make_shortcut(name):
 def install():
     """Install a standalone copy and a command in the existing per-user PATH folder."""
     src = Path(__file__).resolve().parent
-    files = {name: (src / name).read_bytes() for name in ("claude_account.py", "claude_account_windows.py")}
+    files = {name: (src / name).read_bytes() for name in ("claude_account.py", "claude_account_windows.py", "claude_sessions.py", "claude_account_hook.py")}
     version = hashlib.sha256(b"\0".join(files.values())).hexdigest()[:16]
     relative = Path("Programs") / "ClaudeAccountCLI" / version
     target = Path(os.environ["LOCALAPPDATA"]) / relative
@@ -293,10 +293,33 @@ def main():
         sub.add_argument("name", type=label)
         if cmd == "add":
             sub.add_argument("--sso", action="store_true", help="Use Claude's enterprise SSO flow.")
+            sub.add_argument("--isolated", action="store_true", help="Save the login without changing the shared default.")
     cmds.add_parser("list", help="Show saved accounts and Claude's current login.")
     cmds.add_parser("install", help="Make claude-account available from any terminal for this Windows user.")
     cmds.add_parser("recover-login", help="Recover from an interrupted switch followed by an external login.")
-    opts = parser.parse_args()
+    run = cmds.add_parser("run", help="Start a named chat pinned to an already-saved account.")
+    run.add_argument("account", type=label)
+    run.add_argument("--name", type=label, help="Name used to resume this chat.")
+    run.add_argument("--resume", metavar="TRANSCRIPT", help="Import an exited chat's absolute .jsonl transcript path.")
+    resume = cmds.add_parser("resume", help="Reopen a managed chat, keeping or changing its account choice.")
+    resume.add_argument("name", type=label)
+    mode = resume.add_mutually_exclusive_group()
+    mode.add_argument("--account", type=label, help="Pin this stopped chat to another saved account.")
+    mode.add_argument("--shared", action="store_true", help="Follow the current and future shared defaults.")
+    cmds.add_parser("sessions", help="List managed chats, projects, accounts, and lifecycle state.")
+    renew = cmds.add_parser("renew", help="Renew a saved account through isolated browser login.")
+    renew.add_argument("name", type=label)
+    renew.add_argument("--sso", action="store_true")
+    delete = cmds.add_parser("delete-session", help="Remove a stopped chat's isolated login, keeping history by default.")
+    delete.add_argument("name", type=label)
+    delete.add_argument("--history", action="store_true", help="Also remove history in this chat's private directory.")
+    delete.add_argument("--yes", action="store_true", help="Confirm the selected deletion.")
+    argv = sys.argv[1:]
+    split = argv.index("--") if "--" in argv else len(argv)
+    opts = parser.parse_args(argv[:split])
+    extra = argv[split + 1:]
+    if extra and opts.action not in ("run", "resume"):
+        parser.error("Claude options after -- are only accepted by run and resume.")
     if opts.action == "install":
         install()
         return
@@ -309,6 +332,22 @@ def main():
     if not cli:
         raise RuntimeError("claude.exe is not on PATH.")
     manager = Accounts(Path.home(), Vault(), cli)
+    from claude_sessions import Sessions, validate_environment
+    validate_environment(os.environ)
+    sessions = Sessions(Path.home(), Path(os.environ["LOCALAPPDATA"]) / "ClaudeAccountCLI" / "data", manager.vault, cli)
+    if opts.action == "sessions":
+        sessions.listing()
+        return
+    if opts.action == "run":
+        return sessions.run(opts.name, opts.account, Path.cwd(), extra, opts.resume)
+    if opts.action == "resume":
+        return sessions.resume(opts.name, account=opts.account, shared=opts.shared, args=extra)
+    if opts.action == "delete-session":
+        sessions.delete(opts.name, history=opts.history, confirm=opts.yes)
+        return
+    if opts.action == "renew" or (opts.action == "add" and opts.isolated):
+        sessions.enroll(opts.name, renew=opts.action == "renew", sso=opts.sso)
+        return
     if opts.action in ("list", None):
         names = manager.listing()
         if opts.action is None and names:
@@ -332,6 +371,10 @@ def main():
         elif opts.action == "use":
             manager.use(opts.name)
         elif opts.action == "remove":
+            dependent = sessions.dependencies(opts.name)
+            if dependent:
+                raise RuntimeError("Saved account is retained by managed chats: " + ", ".join(dependent) +
+                                   ". Switch their pins or delete their managed logins before removing it.")
             manager.remove(opts.name)
         elif opts.action == "recover-login":
             manager.recover()
@@ -339,7 +382,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main() or 0)
     except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired, argparse.ArgumentTypeError) as error:
         print(f"Stopped: {error}", file=sys.stderr)
         sys.exit(1)

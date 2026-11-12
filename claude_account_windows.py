@@ -136,6 +136,57 @@ create_file = bind(kernel, "CreateFileW", W.HANDLE, W.LPCWSTR, W.DWORD, W.DWORD,
 replace_file = bind(kernel, "ReplaceFileW", W.BOOL, W.LPCWSTR, W.LPCWSTR, W.LPCWSTR, W.DWORD, C.c_void_p, C.c_void_p)
 local_free = bind(kernel, "LocalFree", C.c_void_p, C.c_void_p)
 close_handle = bind(kernel, "CloseHandle", W.BOOL, W.HANDLE)
+create_directory = bind(kernel, "CreateDirectoryW", W.BOOL, W.LPCWSTR, C.POINTER(SecurityAttributes))
+
+
+def reject_links(path):
+    """Never place managed credentials through a junction or symbolic link."""
+    path = Path(os.path.abspath(path))
+    for part in (path, *path.parents):
+        if part.exists() and part.lstat().st_file_attributes & 0x400:
+            raise RuntimeError("Linked or redirected managed paths are not supported.")
+
+
+def private_directory(path):
+    path = Path(path)
+    reject_links(path)
+    if path.exists():
+        if not path.is_dir():
+            raise RuntimeError("Expected a managed directory.")
+        return
+    if not path.parent.exists():
+        private_directory(path.parent)
+    sd = C.c_void_p()
+    if not make_sd("D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)", 1, C.byref(sd), None):
+        raise C.WinError(C.get_last_error())
+    try:
+        sa = SecurityAttributes(C.sizeof(SecurityAttributes), sd, False)
+        if not create_directory(str(path), C.byref(sa)) and C.get_last_error() != 183:
+            raise C.WinError(C.get_last_error())
+    finally:
+        local_free(sd)
+    reject_links(path)
+
+
+class SessionLease:
+    """Exclusive Windows file handle inherited by Claude: survives wrapper death."""
+    def __init__(self, path):
+        self.path, self.handle = Path(path), None
+
+    def __enter__(self):
+        reject_links(self.path)
+        handle = create_file(str(self.path), 0xC0000000, 0, None, 4, 0x80, None)
+        if handle == C.c_void_p(-1).value:
+            error = C.get_last_error()
+            if error in (32, 33):
+                raise RuntimeError("This chat is running or busy. Exit Claude in that chat first.")
+            raise C.WinError(error)
+        self.handle = handle
+        return self
+
+    def __exit__(self, *unused):
+        close_handle(self.handle)
+        self.handle = None
 
 
 def private_json(path, value):
