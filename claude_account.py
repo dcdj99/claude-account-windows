@@ -248,7 +248,7 @@ def make_shortcut(name):
 def install():
     """Install a standalone copy and a command in the existing per-user PATH folder."""
     src = Path(__file__).resolve().parent
-    files = {name: (src / name).read_bytes() for name in ("claude_account.py", "claude_account_windows.py", "claude_sessions.py", "claude_account_hook.py", "claude_native.py")}
+    files = {name: (src / name).read_bytes() for name in ("claude_account.py", "claude_account_windows.py", "claude_auth.py", "claude_native.py", "claude_ui.py")}
     version = hashlib.sha256(b"\0".join(files.values())).hexdigest()[:16]
     relative = Path("Programs") / "ClaudeAccountCLI" / version
     target = Path(os.environ["LOCALAPPDATA"]) / relative
@@ -297,79 +297,70 @@ def main():
     cmds.add_parser("list", help="Show saved accounts and Claude's current login.")
     cmds.add_parser("install", help="Make claude-account available from any terminal for this Windows user.")
     cmds.add_parser("recover-login", help="Recover from an interrupted switch followed by an external login.")
-    run = cmds.add_parser("run", help="Launch native Claude with a saved account; native options follow --.")
+    for action, description in (("start", "Start Claude with a saved account."),
+                                ("resume", "Choose a saved account, then use Claude's resume picker or a conversation name."),
+                                ("continue", "Continue the latest conversation with a saved account.")):
+        sub = cmds.add_parser(action, help=description)
+        sub.add_argument("account", nargs="?", type=label, help="Saved account; asks when omitted.")
+        if action == "start":
+            sub.add_argument("title", nargs="?", help="Optional native conversation name.")
+        elif action == "resume":
+            sub.add_argument("conversation", nargs="?", help="Name, ID or absolute transcript path; opens Claude's picker when omitted.")
+    fork = cmds.add_parser("fork", help="Branch a conversation using a saved account.")
+    fork.add_argument("account", type=label)
+    fork.add_argument("conversation")
+    fork.add_argument("title", help="Name for the new branch.")
+    run = cmds.add_parser("run", help="Advanced native launch; Claude options follow --.")
     run.add_argument("account", type=label)
-    run.add_argument("--name", help="Compatibility alias for native --name after the separator.")
-    run.add_argument("--resume", metavar="SESSION", help="Compatibility alias for native --resume after the separator.")
-    resume = cmds.add_parser("resume", help="Compatibility shortcut for native resume; select --account or --shared.")
-    resume.add_argument("name")
-    mode = resume.add_mutually_exclusive_group()
-    mode.add_argument("--account", type=label, help="Resume using this saved account for this launch.")
-    mode.add_argument("--shared", action="store_true", help="Follow the current and future shared defaults.")
-    sessions_cmd = cmds.add_parser("sessions", help="Show running account launches; Claude's --resume shows history.")
-    sessions_cmd.add_argument("--legacy", action="store_true", help="Inspect the older managed-chat records for migration.")
-    cmds.add_parser("migrate-sessions", help="Make stopped legacy chats visible in native history; retain originals.")
+    cmds.add_parser("sessions", help="Show running account launches; use resume for native history.")
     renew = cmds.add_parser("renew", help="Renew a saved account through isolated browser login.")
     renew.add_argument("name", type=label)
     renew.add_argument("--sso", action="store_true")
-    delete = cmds.add_parser("delete-session", help="Clean an old managed-chat record; native history is unaffected.")
-    delete.add_argument("name", type=label)
-    delete.add_argument("--history", action="store_true", help="Also remove history in this chat's private directory.")
-    delete.add_argument("--yes", action="store_true", help="Confirm the selected deletion.")
     argv = sys.argv[1:]
     split = argv.index("--") if "--" in argv else len(argv)
     opts = parser.parse_args(argv[:split])
     extra = argv[split + 1:]
-    if extra and opts.action not in ("run", "resume"):
-        parser.error("Claude options after -- are only accepted by run and resume.")
+    if extra and opts.action not in ("start", "resume", "continue", "fork", "run"):
+        parser.error("Claude options after -- are only accepted by conversation commands.")
     if opts.action == "install":
         install()
         return
-    overrides = ["CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY",
-                 "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK",
-                 "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_FORCE_WINDOWS_CREDMAN"]
-    if any(os.environ.get(key) not in (None, "", "0") for key in overrides):
-        raise RuntimeError("Open an ordinary PowerShell window using Claude's shared subscription login. This shell has an authentication or profile override.")
+    from claude_auth import validate_environment
+    from claude_native import NativeLauncher
+    from claude_ui import choose_action, choose_account, launch_arguments
+    validate_environment(os.environ)
     cli = shutil.which("claude.exe")
     if not cli:
         raise RuntimeError("claude.exe is not on PATH.")
     manager = Accounts(Path.home(), Vault(), cli)
-    from claude_sessions import Sessions, validate_environment
-    from claude_native import NativeLauncher
-    validate_environment(os.environ)
-    sessions = Sessions(Path.home(), Path(os.environ["LOCALAPPDATA"]) / "ClaudeAccountCLI" / "data", manager.vault, cli)
-    native = NativeLauncher(Path.home(), sessions.root, manager.vault, cli)
+    native = NativeLauncher(Path.home(), Path(os.environ["LOCALAPPDATA"]) / "ClaudeAccountCLI" / "data", manager.vault, cli)
+    if opts.action is None:
+        opts.action = choose_action()
+        if opts.action is None:
+            return 0
+        opts.account = opts.conversation = opts.title = None
+        if opts.action == "use":
+            opts.name = choose_account(manager.vault.names())
+            if opts.name is None:
+                return 0
     if opts.action == "sessions":
-        if opts.legacy:
-            sessions.listing()
-        else:
-            native.reap()
-            native.active(display=True)
-        return
-    if opts.action == "migrate-sessions":
         native.reap()
-        native.migrate_legacy()
-        print("Stopped legacy chats migrated to native history. Originals retained; running legacy chats skipped.")
+        native.active(display=True)
         return
+    if opts.action in ("start", "resume", "continue", "fork"):
+        account = opts.account or choose_account(manager.vault.names())
+        if account is None:
+            return 0
+        forwarded = launch_arguments(opts.action, conversation=getattr(opts, "conversation", None),
+                                     title=getattr(opts, "title", None), extra=extra)
+        return native.run(account, Path.cwd(), forwarded)
     if opts.action == "run":
-        forwarded = (["--name", opts.name] if opts.name else []) + (["--resume", opts.resume] if opts.resume else []) + extra
-        return native.run(opts.account, Path.cwd(), forwarded)
-    if opts.action == "resume":
-        return native.resume_alias(opts.name, account=opts.account, shared=opts.shared, args=extra)
-    if opts.action == "delete-session":
-        sessions.delete(opts.name, history=opts.history, confirm=opts.yes)
-        return
+        return native.run(opts.account, Path.cwd(), extra)
     if opts.action == "renew" or (opts.action == "add" and opts.isolated):
-        sessions.enroll(opts.name, renew=opts.action == "renew", sso=opts.sso)
+        native.enroll(opts.name, renew=opts.action == "renew", sso=opts.sso)
         return
-    if opts.action in ("list", None):
-        names = manager.listing()
-        if opts.action is None and names:
-            selected = input("Profile to activate (Enter to cancel): ").strip()
-            if selected:
-                manager.check_files()
-                with operation_lock(manager.config):
-                    manager.use(label(selected))
+    if opts.action == "list":
+        manager.listing()
         return
     manager.check_files()
     if opts.action == "shortcut":
@@ -389,10 +380,6 @@ def main():
         elif opts.action == "remove":
             if any(r["profile"] == opts.name for r in native.active()):
                 raise RuntimeError("That account has a running launch. Exit it before removing the saved account.")
-            dependent = sessions.dependencies(opts.name)
-            if dependent:
-                raise RuntimeError("Saved account is retained by managed chats: " + ", ".join(dependent) +
-                                   ". Switch their pins or delete their managed logins before removing it.")
             manager.remove(opts.name)
         elif opts.action == "recover-login":
             manager.recover()

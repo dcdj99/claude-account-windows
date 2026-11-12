@@ -8,7 +8,6 @@ import tempfile
 import unittest
 import uuid
 
-from claude_account_hook import record_event
 from claude_account_windows import SessionLease, private_directory
 
 
@@ -38,23 +37,3 @@ class WindowsLifecycleTests(unittest.TestCase):
                 if child and child.poll() is None:
                     child.kill()
                     child.wait()
-
-    def test_hook_records_only_identity_and_rejects_external_transcript(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            config = Path(tmp) / "config"
-            private_directory(config)
-            destination = Path(tmp) / "active.json"
-            sid = str(uuid.uuid4())
-            event = {"hook_event_name": "SessionStart", "session_id": sid,
-                     "transcript_path": str(config / "projects" / "project" / (sid + ".jsonl")),
-                     "cwd": str(Path(tmp)), "prompt": "do not record this", "accessToken": "invented-secret"}
-            record_event(destination, config, "launch-one", event)
-            stored = json.loads(destination.read_text(encoding="utf-8"))
-            self.assertEqual(stored["session_id"], sid)
-            self.assertNotIn("do not record", destination.read_text(encoding="utf-8"))
-            self.assertNotIn("invented-secret", destination.read_text(encoding="utf-8"))
-            before = destination.read_bytes()
-            event["transcript_path"] = str(Path(tmp) / (sid + ".jsonl"))
-            with self.assertRaises(ValueError):
-                record_event(destination, config, "launch-two", event)
-            self.assertEqual(destination.read_bytes(), before)

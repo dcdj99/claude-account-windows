@@ -1,4 +1,4 @@
-"""Account-scoped native launch lifecycle and legacy migration, with disposable data."""
+"""Account-scoped native launch lifecycle with disposable data."""
 import json
 import os
 from pathlib import Path
@@ -10,10 +10,9 @@ import uuid
 
 from claude_account import obj, private_json
 from claude_account_windows import LeaseBusyError, SessionLease, create_history_junction, private_directory
-from claude_native import NativeLauncher, native_args, publish_history
-from claude_sessions import Sessions
+from claude_native import NativeLauncher, native_args
 from test_accounts import MemoryVault
-from test_sessions import FakeClaude, profile
+from support import FakeClaude, profile
 
 
 class NativeLaunchTests(unittest.TestCase):
@@ -118,49 +117,6 @@ class NativeLaunchTests(unittest.TestCase):
         self.manager.run("work", self.project)
         self.assertEqual(self.vault.get("profile/work"), profile("work"))
 
-    def test_migration_keeps_original_and_alias_uses_native_name(self):
-        legacy = Sessions(self.home, self.manager.root, self.vault, "fake", self.base)
-        legacy.run("billing", "work", self.project)
-        original = Path(legacy.record("billing")["transcript"])
-        raw = original.read_bytes()
-        self.manager.run("personal", self.project, ["--resume", "billing"])
-        args = self.calls[-1][0]
-        resumed = Path(args[args.index("--resume") + 1])
-        self.assertTrue(resumed.is_relative_to(self.manager.history))
-        self.assertEqual(resumed.read_bytes(), raw)
-        self.assertEqual(original.read_bytes(), raw)
-        self.assertIn("--name", args)
-        self.assertEqual(legacy.record("billing")["legacy_profile"], "work")
-        self.assertFalse((original.parents[2] / ".credentials.json").exists())
-        self.assertEqual(self.manager.dependencies("work"), [])
-
-    def test_migration_conflict_preserves_original_credentials_and_record(self):
-        legacy = Sessions(self.home, self.manager.root, self.vault, "fake", self.base)
-        legacy.run("billing", "work", self.project)
-        record = legacy.record("billing")
-        original = Path(record["transcript"])
-        dest = self.manager.history / original.parent.name / original.name
-        private_directory(dest.parent)
-        dest.write_text("different native history", encoding="utf-8")
-        with self.assertRaisesRegex(RuntimeError, "conflict"):
-            self.manager.run("personal", self.project)
-        self.assertEqual(legacy.record("billing"), record)
-        self.assertTrue((legacy.folder("billing") / "config" / ".credentials.json").exists())
-        self.assertEqual(dest.read_text(), "different native history")
-
-    def test_atomic_migration_does_not_replace_a_racing_writer(self):
-        source = Path(self.tmp.name) / "source.jsonl"
-        destination = Path(self.tmp.name) / "destination.jsonl"
-        source.write_text("old history", encoding="utf-8")
-        original_rename = Path.rename
-        def race(staged, target):
-            Path(target).write_text("racing history", encoding="utf-8")
-            return original_rename(staged, target)
-        with patch.object(Path, "rename", race):
-            with self.assertRaisesRegex(RuntimeError, "Another writer"):
-                publish_history(source, destination)
-        self.assertEqual(source.read_text(), "old history")
-        self.assertEqual(destination.read_text(), "racing history")
 
     def test_auth_and_background_escape_options_are_rejected(self):
         for args in (["--bg"], ["--settings", "unsafe.json"], ["--bare"], ["auth"],
@@ -186,52 +142,6 @@ class NativeLaunchTests(unittest.TestCase):
         self.manager.reap()
         self.assertFalse(folder.exists())
 
-    def test_migrated_alias_stops_shadowing_native_names_and_compatibility_resume_survives(self):
-        legacy = Sessions(self.home, self.manager.root, self.vault, "fake", self.base)
-        legacy.run("billing", "work", self.project)
-        self.manager.run("personal", self.project, ["--resume", "billing"])
-        self.assertTrue(legacy.record("billing")["native_named"])
-        self.manager.run("work", self.project, ["--resume", "billing"])
-        args = self.calls[-1][0]
-        self.assertEqual(args[-2:], ["--resume", "billing"])
-        self.manager.resume_alias("billing", account="personal")
-        args = self.calls[-1][0]
-        self.assertEqual(args[-1], legacy.record("billing")["native_transcript"])
-        self.assertNotIn("--name", args)
-
-    def test_migration_recovers_newer_legacy_refresh_but_preserves_renewed_generation(self):
-        for name, renewed in (("billing", False), ("audit", True)):
-            legacy = Sessions(self.home, self.manager.root, self.vault, "fake", self.base)
-            legacy.run(name, "work", self.project)
-            fresh = profile("work", expiry=6102444800000)
-            private_json(legacy.folder(name) / "config" / ".credentials.json", {"claudeAiOauth": fresh["oauth"]})
-            if renewed:
-                original = profile("work")
-                original["generation"] = "new-login"
-                self.vault.put("profile/work", original)
-            self.manager.migrate_legacy()
-            if renewed:
-                self.assertEqual(self.vault.get("profile/work"), original)
-            else:
-                self.assertEqual(self.vault.get("profile/work")["oauth"], fresh["oauth"])
-
-    def test_external_legacy_import_migrates_its_auxiliary_bundle(self):
-        legacy = Sessions(self.home, self.manager.root, self.vault, "fake", self.base)
-        legacy.run("billing", "work", self.project)
-        record = legacy.record("billing")
-        external = Path(self.tmp.name) / "external"
-        private_directory(external)
-        source = external / (record["session_id"] + ".jsonl")
-        source.write_bytes(Path(record["transcript"]).read_bytes())
-        bundle = external / record["session_id"] / "tool-results"
-        private_directory(bundle)
-        (bundle / "result.txt").write_text("retained tool output", encoding="utf-8")
-        record.update(transcript=str(source), last_config=str(external))
-        legacy.write(record)
-        self.manager.migrate_legacy()
-        target = Path(legacy.record("billing")["native_transcript"])
-        self.assertEqual((target.parent / record["session_id"] / "tool-results" / "result.txt").read_text(), "retained tool output")
-        self.assertTrue(source.exists())
 
     def test_registry_contention_after_exit_defers_only_empty_metadata(self):
         held = []
@@ -257,15 +167,3 @@ class NativeLaunchTests(unittest.TestCase):
             return original(display)
         with patch.object(self.manager, "_active_locked", probe):
             self.assertEqual(self.manager.active(), [])
-
-    def test_migration_recovers_a_shared_legacy_chats_retained_login(self):
-        legacy = Sessions(self.home, self.manager.root, self.vault, "fake", self.base)
-        legacy.run("billing", "work", self.project)
-        record = legacy.record("billing")
-        record.update(profile=None, retained_profile="work", mode="shared", epoch=None)
-        legacy.write(record)
-        fresh = profile("work", expiry=6102444800000)
-        private_json(legacy.folder("billing") / "config" / ".credentials.json", {"claudeAiOauth": fresh["oauth"]})
-        self.manager.migrate_legacy()
-        self.assertEqual(self.vault.get("profile/work")["oauth"], fresh["oauth"])
-        self.assertIsNone(legacy.record("billing")["retained_profile"])

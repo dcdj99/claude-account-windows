@@ -5,6 +5,7 @@ from pathlib import Path
 import queue
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -13,11 +14,12 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
+import claude_account
 from claude_account import private_json
-from claude_sessions import Sessions, invoke_claude
+from claude_auth import invoke_claude
 from claude_native import NativeLauncher
 from test_accounts import MemoryVault
-from test_sessions import profile
+from support import profile
 
 
 @unittest.skipUnless(os.environ.get("CLAUDE_ACCOUNT_NATIVE_TEST") == "1", "opt-in installed Claude integration")
@@ -149,11 +151,20 @@ class NativeFlowTests(unittest.TestCase):
             with patch.dict(os.environ, env, clear=True):
                 shared("personal")
                 manager = NativeLauncher(home, root / "managed", vault, exe, invoke)
+                def command(args):
+                    with patch.object(sys, "argv", ["claude-account", *args]), \
+                         patch("claude_account.Vault", return_value=vault), \
+                         patch("claude_account.shutil.which", return_value=exe), \
+                         patch("claude_account.Path.home", return_value=home), \
+                         patch("claude_account.Path.cwd", return_value=project), \
+                         patch("claude_native.NativeLauncher", return_value=manager):
+                        return claude_account.main()
                 if os.environ.get("CLAUDE_ACCOUNT_PICKER_TEST") == "1":
                     print("INTERACTIVE FIXTURE: send /exit after the seed reply; then choose picker-example, send journey-pickerresume, and /exit.", flush=True)
-                    manager.run("work", project, ["--name", "picker-example", "--model", "sonnet", "journey-pickerstart"])
+                    command(["start", "work", "picker-example", "--", "--model", "sonnet", "journey-pickerstart"])
                     self.assertEqual(observed[-1]["account"], "work")
-                    manager.run("personal", project, ["--resume"])
+                    with patch("builtins.input", return_value="personal"):
+                        command(["resume"])
                     self.assertEqual(observed[-1]["account"], "personal")
                     self.assertIn("journey-pickerstart", observed[-1]["markers"])
                     self.assertIn("journey-pickerresume", observed[-1]["markers"])
@@ -161,51 +172,43 @@ class NativeFlowTests(unittest.TestCase):
                     (root / "picker-witness.json").write_text(json.dumps(observed, indent=2), encoding="utf-8")
                     print("Native picker witness:", root / "picker-witness.json", flush=True)
                     return
-                manager.run("work", project, ["--name", "billing", "--model", "sonnet", "-p", "journey-start"])
+                command(["start", "work", "billing", "--", "--model", "sonnet", "-p", "journey-start"])
                 self.assertEqual(observed[-1]["account"], "work")
                 self.assertFalse((manager.root / "sessions").exists())
                 initial_transcripts = list(manager.history.rglob("*.jsonl"))
                 self.assertEqual(len(initial_transcripts), 1)
                 billing_transcript = initial_transcripts[0]
-                manager.run("personal", project, ["--resume", "billing", "-p", "journey-switched"])
+                command(["resume", "personal", "billing", "--", "-p", "journey-switched"])
                 self.assertEqual(observed[-1]["account"], "personal")
                 self.assertIn("journey-start", observed[-1]["markers"])
-                manager.run("work", project, ["--resume", billing_transcript.stem, "-p", "journey-id"])
+                command(["resume", "work", billing_transcript.stem, "--", "-p", "journey-id"])
                 self.assertEqual(observed[-1]["account"], "work")
                 self.assertIn("journey-switched", observed[-1]["markers"])
-                manager.run("personal", project, ["--resume", str(billing_transcript), "-p", "journey-path"])
+                command(["resume", "personal", str(billing_transcript), "--", "-p", "journey-path"])
                 self.assertEqual(observed[-1]["account"], "personal")
                 self.assertIn("journey-id", observed[-1]["markers"])
                 shared("lab")
-                manager.run("work", project, ["--resume", "billing", "-p", "journey-work"])
+                command(["resume", "work", "billing", "--", "-p", "journey-work"])
                 self.assertEqual(observed[-1]["account"], "work")
-                manager.run("personal", project, ["--continue", "-p", "journey-continue"])
+                command(["continue", "personal", "--", "-p", "journey-continue"])
                 self.assertIn("journey-work", observed[-1]["markers"])
                 self.assertEqual(observed[-1]["account"], "personal")
-                manager.run("work", project, ["--resume", "billing", "--fork-session", "--name", "side", "-p", "journey-fork"])
+                command(["fork", "work", "billing", "side", "--", "-p", "journey-fork"])
                 self.assertIn("journey-continue", observed[-1]["markers"])
-                manager.run("personal", project, ["--resume", "billing", "-p", "journey-original"])
+                command(["resume", "personal", "billing", "--", "-p", "journey-original"])
                 self.assertNotIn("journey-fork", observed[-1]["markers"])
                 self.assertIn("journey-start", observed[-1]["markers"])
-                manager.run("work", project, ["--model", "sonnet", "-p", "--input-format", "stream-json",
+                command(["run", "work", "--", "--model", "sonnet", "-p", "--input-format", "stream-json",
                                                "--output-format", "stream-json", "--verbose"])
                 self.assertEqual([o["account"] for o in observed[-2:]], ["work", "work"])
                 self.assertIn("journey-livefirst", observed[-1]["markers"])
-                legacy = Sessions(home, root / "managed", vault, exe, invoke)
-                legacy.run("legacy", "lab", project, ["--model", "sonnet", "-p", "journey-legacy"])
-                legacy_original = Path(legacy.record("legacy")["transcript"])
-                manager.run("personal", project, ["--resume", "legacy", "-p", "journey-migrated"])
-                self.assertIn("journey-legacy", observed[-1]["markers"])
-                self.assertEqual(observed[-1]["account"], "personal")
-                self.assertTrue(legacy_original.exists())
-                self.assertTrue(legacy.record("legacy")["native_migrated"])
                 invoke([exe, "--resume", "billing", "-p", "journey-shared"], env=manager.environment(), cwd=project)
                 self.assertEqual(observed[-1]["account"], "personal")
                 self.assertIn("journey-original", observed[-1]["markers"])
                 self.assertEqual(observed[-1]["config_ids"], [])
                 allow_failure = True
                 before_denial = len(observed)
-                result = manager.run("lab", project, ["--resume", "billing", "-p", "journey-denied"])
+                result = command(["resume", "lab", "billing", "--", "-p", "journey-denied"])
                 self.assertNotEqual(result, 0)
                 self.assertTrue(observed[before_denial:])
                 self.assertTrue(all(o["account"] == "lab" for o in observed[before_denial:]))

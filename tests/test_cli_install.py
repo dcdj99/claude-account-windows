@@ -22,12 +22,15 @@ class InstallationTests(unittest.TestCase):
             launcher = bin_dir / "claude-account.cmd"
             installed = list((Path(tmp) / "local" / "Programs" / "ClaudeAccountCLI").iterdir())
             self.assertEqual(len(installed), 1)
-            for name in ("claude_account.py", "claude_account_windows.py", "claude_sessions.py", "claude_account_hook.py", "claude_native.py"):
+            for name in ("claude_account.py", "claude_account_windows.py", "claude_auth.py", "claude_native.py", "claude_ui.py"):
                 self.assertEqual((installed[0] / name).read_bytes(), (source / name).read_bytes())
+            self.assertFalse((installed[0] / "claude_sessions.py").exists())
+            self.assertFalse((installed[0] / "claude_account_hook.py").exists())
             help_result = subprocess.run([sys.executable, "-I", "-B", str(installed[0] / "claude_account.py"), "resume", "--help"],
                                          env=env, capture_output=True, text=True, timeout=15)
             self.assertEqual(help_result.returncode, 0)
-            self.assertIn("--shared", help_result.stdout)
+            self.assertIn("conversation", help_result.stdout)
+            self.assertNotIn("--account", help_result.stdout)
             launcher.write_bytes(b"@rem unrelated user command\r\n")
             refused = subprocess.run([sys.executable, "-I", "-B", str(source / "claude_account.py"), "install"],
                                      env=env, capture_output=True, text=True, timeout=15)
