@@ -298,7 +298,7 @@ def main():
     cmds.add_parser("install", help="Make claude-account available from any terminal for this Windows user.")
     cmds.add_parser("recover-login", help="Recover from an interrupted switch followed by an external login.")
     for action, description in (("start", "Start Claude with a saved account."),
-                                ("resume", "Choose a saved account, then use Claude's resume picker or a conversation name."),
+                                ("resume", "Resume through Claude's picker, or by conversation name, ID or transcript path."),
                                 ("continue", "Continue the latest conversation with a saved account.")):
         sub = cmds.add_parser(action, help=description)
         sub.add_argument("account", nargs="?", type=label, help="Saved account; asks when omitted.")
@@ -314,7 +314,7 @@ def main():
     run.add_argument("account", type=label)
     cmds.add_parser("sessions", help="Show running account launches; use resume for native history.")
     renew = cmds.add_parser("renew", help="Renew a saved account through isolated browser login.")
-    renew.add_argument("name", type=label)
+    renew.add_argument("name", nargs="?", type=label, help="Saved account; asks when omitted.")
     renew.add_argument("--sso", action="store_true")
     argv = sys.argv[1:]
     split = argv.index("--") if "--" in argv else len(argv)
@@ -327,7 +327,7 @@ def main():
         return
     from claude_auth import validate_environment
     from claude_native import NativeLauncher
-    from claude_ui import choose_action, choose_account, launch_arguments
+    from claude_ui import choose_account, launch_arguments, run_menu
     validate_environment(os.environ)
     cli = shutil.which("claude.exe")
     if not cli:
@@ -335,14 +335,7 @@ def main():
     manager = Accounts(Path.home(), Vault(), cli)
     native = NativeLauncher(Path.home(), Path(os.environ["LOCALAPPDATA"]) / "ClaudeAccountCLI" / "data", manager.vault, cli)
     if opts.action is None:
-        opts.action = choose_action()
-        if opts.action is None:
-            return 0
-        opts.account = opts.conversation = opts.title = None
-        if opts.action == "use":
-            opts.name = choose_account(manager.vault.names())
-            if opts.name is None:
-                return 0
+        return run_menu(manager, native)
     if opts.action == "sessions":
         native.reap()
         native.active(display=True)
@@ -357,7 +350,10 @@ def main():
     if opts.action == "run":
         return native.run(opts.account, Path.cwd(), extra)
     if opts.action == "renew" or (opts.action == "add" and opts.isolated):
-        native.enroll(opts.name, renew=opts.action == "renew", sso=opts.sso)
+        name = opts.name or choose_account(manager.vault.names(), "Choose the account to renew:")
+        if name is None:
+            return 0
+        native.enroll(name, renew=opts.action == "renew", sso=opts.sso)
         return
     if opts.action == "list":
         manager.listing()

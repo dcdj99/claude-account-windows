@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import uuid
 from unittest.mock import Mock, patch
 
 import claude_account
@@ -55,8 +56,34 @@ class CommandJourneyTests(unittest.TestCase):
         self.accounts.use.assert_not_called()
 
     def test_no_argument_menu_resumes_without_changing_shared_default(self):
-        self.command([], ["1", "2"])
+        self.command([], ["resume", "work", ""])
         self.native.run.assert_called_once_with("work", Path.cwd(), ["--resume"])
+        self.accounts.use.assert_not_called()
+
+    def test_menu_renews_account_then_allows_resuming_with_its_session_id(self):
+        session_id = str(uuid.uuid4())
+        self.command([], ["renew", "personal", "resume-id", "personal", session_id, ""])
+        self.native.enroll.assert_called_once_with("personal", renew=True)
+        self.native.run.assert_called_once_with("personal", Path.cwd(), ["--resume", session_id])
+        self.accounts.use.assert_not_called()
+
+    def test_menu_can_cancel_id_entry_without_launching(self):
+        self.command([], ["resume-id", "work", "", ""])
+        self.native.run.assert_not_called()
+
+    def test_renew_without_account_prompts_for_saved_account(self):
+        self.command(["renew"], ["work"])
+        self.native.enroll.assert_called_once_with("work", renew=True, sso=False)
+        self.native.run.assert_not_called()
+
+    def test_renew_cancellation_does_not_open_login(self):
+        self.command(["renew"], [""])
+        self.native.enroll.assert_not_called()
+
+    def test_resume_accepts_exit_message_session_id_without_a_picker(self):
+        session_id = str(uuid.uuid4())
+        self.command(["resume", "personal", session_id], interactive=False)
+        self.native.run.assert_called_once_with("personal", Path.cwd(), ["--resume", session_id])
         self.accounts.use.assert_not_called()
 
     def test_cancel_and_invalid_account_do_not_fall_back_to_shared(self):

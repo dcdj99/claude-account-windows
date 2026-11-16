@@ -1,5 +1,6 @@
 """Small terminal menus and shortcuts for native Claude conversation actions."""
 import sys
+from pathlib import Path
 
 
 def choose(title, rows):
@@ -23,18 +24,65 @@ def choose(title, rows):
         print("Choose one of the listed entries, or press Enter to cancel.")
 
 
-def choose_account(names):
+def choose_account(names, title="Choose the account for this launch:"):
     names = sorted(names)
     if not names:
         raise RuntimeError("No saved accounts. Use 'claude-account save NAME' or 'claude-account add NAME --isolated'.")
-    return choose("Choose the account for this launch (shared default is unchanged):", [(name, name) for name in names])
+    return choose(title, [(name, name) for name in names])
 
 
 def choose_action():
-    return choose("Claude accounts", [("resume", "Resume a conversation"), ("start", "Start a conversation"),
+    return choose("Claude accounts", [("resume", "Resume using Claude's session picker"),
+                                     ("resume-id", "Resume by session ID or name"), ("start", "Start a conversation"),
                                      ("continue", "Continue the latest conversation"),
+                                     ("renew", "Renew a saved account"),
                                      ("use", "Change the shared default account"),
                                      ("list", "List saved accounts"), ("sessions", "Show running launches")])
+
+
+def conversation_reference():
+    try:
+        value = input("Session ID, conversation name or transcript path (Enter to cancel): ").strip()
+    except EOFError:
+        value = ""
+    return value or None
+
+
+def run_menu(manager, native):
+    from claude_account_windows import operation_lock
+    while True:
+        action = choose_action()
+        if action is None:
+            return 0
+        if action == "list":
+            manager.listing()
+            continue
+        if action == "sessions":
+            native.reap()
+            native.active(display=True)
+            continue
+        title = {"renew": "Choose the account to renew:",
+                 "use": "Choose the shared default account:"}.get(action, "Choose the account for this launch:")
+        account = choose_account(manager.vault.names(), title)
+        if account is None:
+            continue
+        if action == "renew":
+            native.enroll(account, renew=True)
+            continue
+        if action == "use":
+            manager.check_files()
+            with operation_lock(manager.config):
+                manager.use(account)
+            continue
+        conversation = None
+        if action == "resume-id":
+            conversation = conversation_reference()
+            if conversation is None:
+                continue
+            action = "resume"
+        result = native.run(account, Path.cwd(), launch_arguments(action, conversation=conversation))
+        if result:
+            return result
 
 
 def launch_arguments(action, *, conversation=None, title=None, extra=()):

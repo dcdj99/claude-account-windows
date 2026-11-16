@@ -72,7 +72,7 @@ Open PowerShell in the project folder where you want Claude to work, then run:
 claude-account
 ```
 
-The menu lets you start, resume or continue a conversation, choose an account, and view running launches. Press Enter at a menu prompt to cancel.
+The menu lets you start, resume or continue a conversation, renew a saved account, and view running launches. After a conversation exits or renewal finishes, the menu opens again so you can choose your next action. Press Enter at the main menu to exit, or at an account or ID-entry prompt to return to the menu.
 
 To go straight to resuming:
 
@@ -82,6 +82,8 @@ claude-account resume
 
 Choose a saved account, then choose a conversation in Claude's native picker. You do not need to remember a conversation name or session ID.
 
+In the main menu, choose **Resume by session ID or name** to enter a session ID instead of using the picker. Choose the saved account, paste the ID Claude displayed when the conversation exited, then press Enter.
+
 ### Shortcuts
 
 | What you want to do | Command |
@@ -90,6 +92,7 @@ Choose a saved account, then choose a conversation in Claude's native picker. Yo
 | Start and name a conversation | `claude-account start work billing` |
 | Pick a conversation using a particular account | `claude-account resume personal` |
 | Resume a named conversation | `claude-account resume personal billing` |
+| Resume using the ID shown when Claude exited | `claude-account resume personal SESSION_ID` |
 | Continue the latest conversation in this project | `claude-account continue work` |
 | Make a separate branch of a conversation | `claude-account fork work billing experiment` |
 | See currently running account launches | `claude-account sessions` |
@@ -111,6 +114,14 @@ claude-account resume personal billing
 ```
 
 The conversation continues using `personal`. The selected account applies to that launch; choose an account again when reopening the conversation. Other account-launched processes keep their own logins.
+
+If Claude prints `claude --resume SESSION_ID` on exit, reuse that same ID:
+
+```powershell
+claude-account resume personal SESSION_ID
+```
+
+Replace `SESSION_ID` with the complete ID from the exit message. Run this in the original project folder. You can also return to the menu and choose **Resume by session ID or name**. The **Resume using Claude's session picker** option remains available.
 
 Claude manages conversation history, names, project filtering and retention. Accounts share the native local history on this Windows user profile. You can also resume these conversations with ordinary `claude --resume`, which uses the shared login.
 
@@ -138,7 +149,9 @@ You can also choose **Change the shared default account** from the menu. The ast
 | Forget a saved account label | `claude-account remove work` |
 | Create a shared-account switching shortcut in the current folder | `claude-account shortcut work` |
 
-Renewal opens a browser and requires the identity already saved under that label. Exit and reopen affected launches afterward. Ordinary `add NAME` without `--isolated` also changes the shared login.
+For renewal through the menu, run `claude-account`, choose **Renew a saved account**, and select its label. Claude opens its normal browser login. Sign in to the same account already saved under that label. When renewal finishes, choose either resume option to reopen your conversation.
+
+You can also run `claude-account renew` to choose the account, or `claude-account renew work` to name it directly. For an explicit enterprise SSO flow, use `claude-account renew work --sso`. Renewal updates the saved login for future launches. Exit and reopen affected launches afterward. Ordinary `add NAME` without `--isolated` also changes the shared login.
 
 Removing a label keeps conversation history. It is refused while an account launch using that label is running. Removing the current shared profile does not sign ordinary Claude out; use Claude's own logout command to sign out.
 
@@ -152,7 +165,7 @@ Removing a label keeps conversation history. It is refused while an account laun
 
 Replace the example path with the folder where you extracted the files.
 
-**A saved login has expired or stopped working.** Run `claude-account renew NAME`, sign in to the same account, then reopen the conversation.
+**A saved login has expired or stopped working.** Choose **Renew a saved account** in `claude-account`, or run `claude-account renew NAME`. Sign in to the same account, then resume through the picker or with its session ID.
 
 **Claude reports an unsupported authentication setting.** Use an ordinary PowerShell window with the standard Claude subscription login. API-key or provider overrides and custom authentication settings cannot be combined with these account launches.
 
